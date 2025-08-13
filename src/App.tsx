@@ -4,8 +4,6 @@ import { Card, CardContent } from "./components/ui/card";
 import { Button } from "./components/ui/button";
 import { Slider } from "./components/ui/slider";
 import { Input } from "./components/ui/input";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./components/ui/select";
 import { TrendingUp, LineChart, Settings, RefreshCcw } from "lucide-react";
 import { LineChart as RLineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -17,29 +15,45 @@ const TICKERS = [
 
 type Provider = "stooq" | "finnhub" | "alphavantage";
 
-function fmt(n: number) { return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }); }
+function fmt(n: number) {
+  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
 function ema(values: number[], period: number): number[] {
   if (!values.length) return [];
   const k = 2 / (period + 1);
   const out: number[] = [];
   let prev = values[0];
   out.push(prev);
-  for (let i = 1; i < values.length; i++) { prev = values[i] * k + prev * (1 - k); out.push(prev); }
+  for (let i = 1; i < values.length; i++) {
+    prev = values[i] * k + prev * (1 - k);
+    out.push(prev);
+  }
   return out;
 }
+
 function stdev(values: number[]) {
   if (values.length < 2) return 0;
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const v = values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1);
   return Math.sqrt(v);
 }
+
 function slope(y: number[]) {
-  const n = y.length; if (n < 2) return 0;
-  const xMean = (n - 1) / 2; const yMean = y.reduce((a, b) => a + b, 0) / n;
-  let num = 0; let den = 0;
-  for (let i = 0; i < n; i++) { const dx = i - xMean; num += dx * (y[i] - yMean); den += dx * dx; }
+  const n = y.length;
+  if (n < 2) return 0;
+  const xMean = (n - 1) / 2;
+  const yMean = y.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = i - xMean;
+    num += dx * (y[i] - yMean);
+    den += dx * dx;
+  }
   return num / den;
 }
+
 function slopeScore(prices: number[]) {
   if (prices.length < 5) return 0;
   const recent = prices.slice(-20);
@@ -47,6 +61,7 @@ function slopeScore(prices: number[]) {
   const vol = stdev(recent);
   return vol ? s / vol : 0;
 }
+
 function momentumScore(prices: number[]) {
   if (prices.length < 21) return 0;
   const emaFast = ema(prices, 10);
@@ -55,6 +70,7 @@ function momentumScore(prices: number[]) {
   const base = emaSlow[emaSlow.length - 1] || 1;
   return diff / base;
 }
+
 function compositeScore(prices: number[], weights: { slopeW: number; momentumW: number; recentW: number }) {
   const { slopeW, momentumW, recentW } = weights;
   if (prices.length < 5) return -Infinity;
@@ -64,6 +80,7 @@ function compositeScore(prices: number[], weights: { slopeW: number; momentumW: 
   const r = (recent[recent.length - 1] - recent[0]) / (recent[0] || 1);
   return slopeW * s1 + momentumW * s2 + recentW * r;
 }
+
 function mapSymbol(symbol: string, provider: Provider) {
   if (provider === "stooq") {
     if (symbol === "BRK.B") return "brk-b.us";
@@ -71,13 +88,16 @@ function mapSymbol(symbol: string, provider: Provider) {
   }
   return symbol;
 }
+
+// ---- Historical data fetchers ----
 async function fetchStooqDaily(symbol: string) {
   const url = `https://stooq.com/q/d/l/?s=${symbol}&i=d`;
   const res = await fetch(url);
   const csv = await res.text();
-  const rows = csv.trim().split(/\\n+/).slice(1).map((r) => r.split(","));
+  const rows = csv.trim().split(/\n+/).slice(1).map((r) => r.split(","));
   return rows.map(([date, _o, _h, _l, c]) => ({ date, close: Number(c) })).filter(x => !Number.isNaN(x.close));
 }
+
 async function fetchFinnhub(symbol: string, apiKey: string) {
   const now = Math.floor(Date.now() / 1000);
   const yearAgo = now - 400 * 24 * 3600;
@@ -88,6 +108,7 @@ async function fetchFinnhub(symbol: string, apiKey: string) {
   if (j.s !== "ok") throw new Error("Finnhub: bad status");
   return j.t.map((t: number, i: number) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: j.c[i] }));
 }
+
 async function fetchAlphaVantage(symbol: string, apiKey: string) {
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${encodeURIComponent(symbol)}&outputsize=compact&apikey=${apiKey}`;
   const res = await fetch(url);
@@ -99,6 +120,7 @@ async function fetchAlphaVantage(symbol: string, apiKey: string) {
   return rows;
 }
 
+// ---- Live quote fetchers ----
 async function fetchFinnhubQuote(symbol: string, apiKey: string) {
   const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`;
   const res = await fetch(url);
@@ -106,6 +128,7 @@ async function fetchFinnhubQuote(symbol: string, apiKey: string) {
   const j = await res.json(); // { c, d, dp, h, l, o, pc, t }
   return { price: Number(j.c), ts: Number(j.t) ? new Date(Number(j.t) * 1000).toISOString() : null };
 }
+
 async function fetchAlphaVantageQuote(symbol: string, apiKey: string) {
   const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
   const res = await fetch(url);
@@ -113,7 +136,7 @@ async function fetchAlphaVantageQuote(symbol: string, apiKey: string) {
   const j = await res.json();
   const q = j["Global Quote"] || {};
   const px = Number(q["05. price"] || q["05. Price"] || q["05. PRICE"]);
-  const ts = q["07. latest trading day"] || null;
+  const ts = (q["07. latest trading day"] as string) || null;
   return { price: px, ts };
 }
 
@@ -129,39 +152,48 @@ export default function App() {
   const [provider, setProvider] = useState<Provider>("stooq");
   const [apiKey, setApiKey] = useState<string>("");
   const [series, setSeries] = useState<Record<string, { date: string; close: number }[]>>({});
-  const [quotes, setQuotes] = useState<Record<string, { price: number|null; ts: string|null }>>({});
+  const [quotes, setQuotes] = useState<Record<string, { price: number | null; ts: string | null }>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [weights, setWeights] = useState({ slopeW: 0.5, momentumW: 0.35, recentW: 0.15 });
   const [refreshSec, setRefreshSec] = useState(60);
 
-  
   const refresh = async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
       const data: Record<string, { date: string; close: number }[]> = {};
-      const q: Record<string, { price: number|null; ts: string|null }> = {};
+      const q: Record<string, { price: number | null; ts: string | null }> = {};
+
       for (const t of TICKERS) {
+        // historical
         data[t.symbol] = await fetchSeries(provider, t.symbol, apiKey.trim() || undefined);
-        // live quote where possible
+
+        // live quote if available
         if (provider === "finnhub" && apiKey.trim()) {
-          try { q[t.symbol] = await fetchFinnhubQuote(t.symbol, apiKey.trim()); } catch { q[t.symbol] = { price: null, ts: null }; }
+          try {
+            q[t.symbol] = await fetchFinnhubQuote(t.symbol, apiKey.trim());
+          } catch (e) {
+            q[t.symbol] = { price: null, ts: null };
+          }
         } else if (provider === "alphavantage" && apiKey.trim()) {
-          try { q[t.symbol] = await fetchAlphaVantageQuote(t.symbol, apiKey.trim()); } catch { q[t.symbol] = { price: null, ts: null }; }
+          try {
+            q[t.symbol] = await fetchAlphaVantageQuote(t.symbol, apiKey.trim());
+          } catch (e) {
+            q[t.symbol] = { price: null, ts: null };
+          }
         } else {
-          q[t.symbol] = { price: null, ts: null }; // stooq has no live quote endpoint
+          q[t.symbol] = { price: null, ts: null }; // stooq or no key
         }
       }
+
       setSeries(data);
       setQuotes(q);
-    } catch (e:any) { setError(e.message || "Failed to fetch prices"); }
-    finally { setLoading(false); }
-  };
-
-      for (const t of TICKERS) { data[t.symbol] = await fetchSeries(provider, t.symbol, apiKey.trim() || undefined); }
-      setSeries(data);
-    } catch (e:any) { setError(e.message || "Failed to fetch prices"); }
-    finally { setLoading(false); }
+    } catch (e: any) {
+      setError(e.message || "Failed to fetch prices");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -171,13 +203,19 @@ export default function App() {
   }, [provider, apiKey, refreshSec]);
 
   const latestPrices = useMemo(() => {
-    const out: Record<string, number | null> = {};
+    const out: Record<string, { display: number | null; source: "quote" | "close"; ts: string | null }> = {};
     for (const t of TICKERS) {
       const s = series[t.symbol] || [];
-      out[t.symbol] = s.length ? s[s.length - 1].close : null;
+      const lastClose = s.length ? s[s.length - 1].close : null;
+      const q = quotes[t.symbol];
+      if (q && Number.isFinite(q.price as number)) {
+        out[t.symbol] = { display: Number(q.price), source: "quote", ts: q.ts };
+      } else {
+        out[t.symbol] = { display: lastClose, source: "close", ts: s.length ? s[s.length - 1].date : null };
+      }
     }
     return out;
-  }, [series]);
+  }, [series, quotes]);
 
   const scores = useMemo(() => {
     const sc: Record<string, number> = {};
@@ -195,7 +233,8 @@ export default function App() {
     return entries[0][0];
   }, [scores]);
 
-  const gradientBg = "bg-[radial-gradient(80rem_80rem_at_80%_-10%,rgba(99,102,241,0.18),transparent),radial-gradient(60rem_60rem_at_-10%_-10%,rgba(34,197,94,0.16),transparent),linear-gradient(180deg,#0b1020,#060913)]";
+  const gradientBg =
+    "bg-[radial-gradient(80rem_80rem_at_80%_-10%,rgba(99,102,241,0.18),transparent),radial-gradient(60rem_60rem_at_-10%_-10%,rgba(34,197,94,0.16),transparent),linear-gradient(180deg,#0b1020,#060913)]";
 
   return (
     <div className={`min-h-screen ${gradientBg} text-white`}>
@@ -216,19 +255,26 @@ export default function App() {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Prices + Charts */}
           <div className="lg:col-span-2 space-y-6">
             <div className="glass">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-medium">Live Prices</h2>
-                  <div className="text-xs text-white/60">Provider: {provider.toUpperCase()} {provider !== "stooq" && !apiKey ? "(no key → fallback)" : ""} · Live when available</div>
+                  <div className="text-xs text-white/60">
+                    Provider: {provider.toUpperCase()} {provider !== "stooq" && !apiKey ? "(no key → fallback)" : ""} · Live when available
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {TICKERS.map((t) => (
                     <div key={t.symbol} className="rounded-2xl p-4 bg-white/5 border border-white/10">
                       <div className="text-white/70 text-xs">{t.name}</div>
-                      <div className="text-2xl font-semibold mt-1">{latestPrices[t.symbol]?.display != null ? fmt(latestPrices[t.symbol]!.display as number) : "—"}</div>
-                      <div className="text-white/60 text-xs mt-1">{t.symbol} · {latestPrices[t.symbol]?.source === "quote" ? "Live" : "Close"}</div>
+                      <div className="text-2xl font-semibold mt-1">
+                        {latestPrices[t.symbol]?.display != null ? fmt(latestPrices[t.symbol]!.display as number) : "—"}
+                      </div>
+                      <div className="text-white/60 text-xs mt-1">
+                        {t.symbol} · {latestPrices[t.symbol]?.source === "quote" ? "Live" : "Close"}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -265,6 +311,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* Right: Recommendation & Settings */}
           <div className="space-y-6">
             <div className="glass">
               <CardContent className="p-6">
@@ -297,7 +344,7 @@ export default function App() {
 
                 <div className="space-y-2">
                   <label className="text-sm text-white/80">Data Provider</label>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <Button className="rounded-xl" onClick={()=>setProvider("stooq")}>Stooq (free)</Button>
                     <Button className="rounded-xl" onClick={()=>setProvider("finnhub")}>Finnhub</Button>
                     <Button className="rounded-xl" onClick={()=>setProvider("alphavantage")}>Alpha Vantage</Button>
@@ -308,7 +355,7 @@ export default function App() {
                   <div className="space-y-2">
                     <label className="text-sm text-white/80">API Key ({provider})</label>
                     <Input value={apiKey} onChange={(e:any) => setApiKey(e.target.value)} placeholder="Paste your API key" />
-                    <p className="text-xs text-white/60">Optional. Without a key, prices will use Stooq (daily).</p>
+                    <p className="text-xs text-white/60">Optional. Without a key, prices use Stooq (daily). With a key, you'll see Live quotes when the market trades; otherwise last Close.</p>
                   </div>
                 )}
 
