@@ -26,3 +26,11 @@ Open http://localhost:5173
 - BRK.B is handled for Stooq (`brk-b.us`), so it “just works”.
 - If you add API keys, choose the provider in **Settings** inside the app.
 - This is not financial advice. For information only.
+
+
+## Vercel API (no CORS issues)
+- The app now calls **/api/series** and **/api/quote** hosted on your Vercel project.
+- Set env vars in Vercel → Project Settings → Environment Variables if you want live/intraday data:
+  - `FINNHUB_API_KEY`
+  - `ALPHAVANTAGE_API_KEY`
+- Without keys, the app still works using Stooq daily closes through the proxy.

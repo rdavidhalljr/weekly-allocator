@@ -90,7 +90,7 @@ function mapSymbol(symbol: string, provider: Provider) {
 }
 
 // ---- Historical data fetchers ----
-async function fetchStooqDaily(symbol: string) {
+async function fetchStooqDaily(symbol: string) { // unused directly; keeping for reference
   const url = `https://stooq.com/q/d/l/?s=${symbol}&i=d`;
   const res = await fetch(url);
   const csv = await res.text();
@@ -121,16 +121,16 @@ async function fetchAlphaVantage(symbol: string, apiKey: string) {
 }
 
 // ---- Live quote fetchers ----
-async function fetchFinnhubQuote(symbol: string, apiKey: string) {
-  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`;
+async function fetchFinnhubQuote(symbol: string, apiKey: string) { // now proxied via /api
+  const url = `/api/quote?provider=finnhub&symbol=${encodeURIComponent(symbol)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Finnhub quote error");
   const j = await res.json(); // { c, d, dp, h, l, o, pc, t }
   return { price: Number(j.c), ts: Number(j.t) ? new Date(Number(j.t) * 1000).toISOString() : null };
 }
 
-async function fetchAlphaVantageQuote(symbol: string, apiKey: string) {
-  const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
+async function fetchAlphaVantageQuote(symbol: string, apiKey: string) { // now proxied via /api
+  const url = `/api/quote?provider=alphavantage&symbol=${encodeURIComponent(symbol)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Alpha Vantage quote error");
   const j = await res.json();
@@ -140,11 +140,11 @@ async function fetchAlphaVantageQuote(symbol: string, apiKey: string) {
   return { price: px, ts };
 }
 
-async function fetchSeries(provider: Provider, symbol: string, apiKey?: string) {
+async function fetchSeries(provider: Provider, symbol: string, apiKey?: string) { // proxied through /api
   const mapped = mapSymbol(symbol, provider);
-  if (provider === "stooq") return fetchStooqDaily(mapped);
-  if (provider === "finnhub" && apiKey) return fetchFinnhub(mapped, apiKey);
-  if (provider === "alphavantage" && apiKey) return fetchAlphaVantage(mapped, apiKey);
+  if (provider === "stooq") { const r = await fetch(`/api/series?provider=stooq&symbol=${symbol}`); const j = await r.json(); return j.series || []; }
+  if (provider === "finnhub" && apiKey) { const r = await fetch(`/api/series?provider=finnhub&symbol=${symbol}`); const j = await r.json(); return j.series || []; }
+  if (provider === "alphavantage" && apiKey) { const r = await fetch(`/api/series?provider=alphavantage&symbol=${symbol}`); const j = await r.json(); return j.series || []; }
   return fetchStooqDaily(mapSymbol(symbol, "stooq"));
 }
 
