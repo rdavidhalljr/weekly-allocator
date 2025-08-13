@@ -98,6 +98,25 @@ async function fetchAlphaVantage(symbol: string, apiKey: string) {
   rows.sort((a: any, b: any) => (a.date < b.date ? -1 : 1));
   return rows;
 }
+
+async function fetchFinnhubQuote(symbol: string, apiKey: string) {
+  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Finnhub quote error");
+  const j = await res.json(); // { c, d, dp, h, l, o, pc, t }
+  return { price: Number(j.c), ts: Number(j.t) ? new Date(Number(j.t) * 1000).toISOString() : null };
+}
+async function fetchAlphaVantageQuote(symbol: string, apiKey: string) {
+  const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Alpha Vantage quote error");
+  const j = await res.json();
+  const q = j["Global Quote"] || {};
+  const px = Number(q["05. price"] || q["05. Price"] || q["05. PRICE"]);
+  const ts = q["07. latest trading day"] || null;
+  return { price: px, ts };
+}
+
 async function fetchSeries(provider: Provider, symbol: string, apiKey?: string) {
   const mapped = mapSymbol(symbol, provider);
   if (provider === "stooq") return fetchStooqDaily(mapped);
@@ -110,15 +129,35 @@ export default function App() {
   const [provider, setProvider] = useState<Provider>("stooq");
   const [apiKey, setApiKey] = useState<string>("");
   const [series, setSeries] = useState<Record<string, { date: string; close: number }[]>>({});
+  const [quotes, setQuotes] = useState<Record<string, { price: number|null; ts: string|null }>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [weights, setWeights] = useState({ slopeW: 0.5, momentumW: 0.35, recentW: 0.15 });
   const [refreshSec, setRefreshSec] = useState(60);
 
+  
   const refresh = async () => {
     setLoading(true); setError(null);
     try {
       const data: Record<string, { date: string; close: number }[]> = {};
+      const q: Record<string, { price: number|null; ts: string|null }> = {};
+      for (const t of TICKERS) {
+        data[t.symbol] = await fetchSeries(provider, t.symbol, apiKey.trim() || undefined);
+        // live quote where possible
+        if (provider === "finnhub" && apiKey.trim()) {
+          try { q[t.symbol] = await fetchFinnhubQuote(t.symbol, apiKey.trim()); } catch { q[t.symbol] = { price: null, ts: null }; }
+        } else if (provider === "alphavantage" && apiKey.trim()) {
+          try { q[t.symbol] = await fetchAlphaVantageQuote(t.symbol, apiKey.trim()); } catch { q[t.symbol] = { price: null, ts: null }; }
+        } else {
+          q[t.symbol] = { price: null, ts: null }; // stooq has no live quote endpoint
+        }
+      }
+      setSeries(data);
+      setQuotes(q);
+    } catch (e:any) { setError(e.message || "Failed to fetch prices"); }
+    finally { setLoading(false); }
+  };
+
       for (const t of TICKERS) { data[t.symbol] = await fetchSeries(provider, t.symbol, apiKey.trim() || undefined); }
       setSeries(data);
     } catch (e:any) { setError(e.message || "Failed to fetch prices"); }
@@ -182,14 +221,14 @@ export default function App() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-medium">Live Prices</h2>
-                  <div className="text-xs text-white/60">Provider: {provider.toUpperCase()} {provider !== "stooq" && !apiKey ? "(no key → fallback)" : ""}</div>
+                  <div className="text-xs text-white/60">Provider: {provider.toUpperCase()} {provider !== "stooq" && !apiKey ? "(no key → fallback)" : ""} · Live when available</div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {TICKERS.map((t) => (
                     <div key={t.symbol} className="rounded-2xl p-4 bg-white/5 border border-white/10">
                       <div className="text-white/70 text-xs">{t.name}</div>
-                      <div className="text-2xl font-semibold mt-1">{latestPrices[t.symbol] != null ? fmt(latestPrices[t.symbol] as number) : "—"}</div>
-                      <div className="text-white/60 text-xs mt-1">{t.symbol}</div>
+                      <div className="text-2xl font-semibold mt-1">{latestPrices[t.symbol]?.display != null ? fmt(latestPrices[t.symbol]!.display as number) : "—"}</div>
+                      <div className="text-white/60 text-xs mt-1">{t.symbol} · {latestPrices[t.symbol]?.source === "quote" ? "Live" : "Close"}</div>
                     </div>
                   ))}
                 </div>
