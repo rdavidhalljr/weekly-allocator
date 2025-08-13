@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-[#060913] text-white;
+}
+
+.glass {
+  @apply bg-white/5 border border-white/10 rounded-3xl;
+  backdrop-filter: blur(8px);
+}
